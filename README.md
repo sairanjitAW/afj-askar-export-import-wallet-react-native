@@ -9,9 +9,9 @@ The main agent setup and logic are in the `App.tsx`
 Make sure have yarn installed and react native setup
 
 ```bash
-git clone https://github.com/sairanjitAW/afj-askar-export-import-wallet-react-native.git
+git clone https://github.com/sairanjitAW/afj-askar-wallet-react-native.git
 
-cd afj-askar-export-import-wallet-react-native
+cd afj-askar-wallet-react-native
 
 yarn install
 
