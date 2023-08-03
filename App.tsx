@@ -55,7 +55,7 @@ const bobAgent = new Agent(bobAgentOptions);
 
 const App = () => {
   const test = async () => {
-    const documentDirectory = RNFS.DownloadDirectoryPath;
+    const documentDirectory = RNFS.DocumentDirectoryPath;
     const backupDirectory = `${documentDirectory}/Wallet_Backup`;
 
     const destFileExists = await RNFS.exists(backupDirectory);
