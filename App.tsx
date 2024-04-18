@@ -5,22 +5,22 @@
  * @format
  */
 
-import {AskarModule} from '@aries-framework/askar';
+import {AskarModule} from '@credo-ts/askar';
 import {
   Agent,
   BasicMessageRecord,
   BasicMessageRepository,
   BasicMessageRole,
-  ConnectionsModule,
   ConsoleLogger,
   InitConfig,
   KeyDerivationMethod,
   LogLevel,
-} from '@aries-framework/core';
-import {agentDependencies} from '@aries-framework/react-native';
+} from '@credo-ts/core';
+import {agentDependencies} from '@credo-ts/react-native';
 import {ariesAskar} from '@hyperledger/aries-askar-react-native';
 import React from 'react';
-import {Button, SafeAreaView} from 'react-native';
+import {Button, SafeAreaView, View} from 'react-native';
+import {pickSingle, types} from 'react-native-document-picker';
 import RNFS from 'react-native-fs';
 
 const getSqliteAgentOptions = (
@@ -30,12 +30,12 @@ const getSqliteAgentOptions = (
   const config: InitConfig = {
     label: `SQLiteAgent: ${name}`,
     walletConfig: {
-      id: `oldWalletId`,
-      key: `oldWaletKey`,
+      id: 'oldWalletId',
+      key: 'oldWaletKey',
       keyDerivationMethod: KeyDerivationMethod.Argon2IInt,
     },
     autoUpdateStorageOnStartup: false,
-    logger: new ConsoleLogger(LogLevel.debug),
+    logger: new ConsoleLogger(LogLevel.trace),
     ...extraConfig,
   };
   return {
@@ -43,9 +43,6 @@ const getSqliteAgentOptions = (
     dependencies: agentDependencies,
     modules: {
       askar: new AskarModule({ariesAskar}),
-      connections: new ConnectionsModule({
-        autoAcceptConnections: true,
-      }),
     },
   } as const;
 };
@@ -55,7 +52,7 @@ const bobAgent = new Agent(bobAgentOptions);
 
 const App = () => {
   const test = async () => {
-    const documentDirectory = RNFS.DocumentDirectoryPath;
+    const documentDirectory = RNFS.DownloadDirectoryPath;
     const backupDirectory = `${documentDirectory}/Wallet_Backup`;
 
     const destFileExists = await RNFS.exists(backupDirectory);
@@ -93,6 +90,8 @@ const App = () => {
 
     const backupKey = 'SomeRandomBackUpKey';
 
+    console.log('bobAgent.wallet.isProvisioned', encryptedFileLocation);
+
     // Create backup and delete wallet
     await bobAgent.wallet.export({path: encryptedFileLocation, key: backupKey});
     await bobAgent.wallet.delete();
@@ -100,14 +99,14 @@ const App = () => {
     // Import backup with different wallet id and initialize
     await bobAgent.wallet.import(
       {
-        id: 'newWalletId',
+        id: 'oldWalletId',
         key: 'newWalletKey',
         keyDerivationMethod: KeyDerivationMethod.Argon2IInt,
       },
       {path: encryptedFileLocation, key: backupKey},
     );
     await bobAgent.wallet.initialize({
-      id: 'newWalletId',
+      id: 'oldWalletId',
       key: 'newWalletKey',
       keyDerivationMethod: KeyDerivationMethod.Argon2IInt,
     });
@@ -120,15 +119,125 @@ const App = () => {
     console.log('check  ', res.id, res.id === basicMessageRecord.id);
 
     await bobAgent.shutdown();
+
     if (bobAgent.wallet.isProvisioned) {
       await bobAgent.wallet.delete();
+    }
+  };
+
+  const exportWallet = async () => {
+    const documentDirectory = RNFS.DownloadDirectoryPath;
+    const backupDirectory = `${documentDirectory}/Wallet_Backup`;
+
+    const destFileExists = await RNFS.exists(backupDirectory);
+    if (destFileExists) {
+      await RNFS.unlink(backupDirectory);
+    }
+
+    const date = new Date();
+    const dformat = `${date.getHours()}-${date.getMinutes()}-${date.getSeconds()}`;
+    const WALLET_FILE_NAME = `SSI_Wallet_${dformat}`;
+
+    await RNFS.mkdir(backupDirectory);
+    const encryptedFileName = `${WALLET_FILE_NAME}.wallet`;
+    const encryptedFileLocation = `${backupDirectory}/${encryptedFileName}`;
+
+    await bobAgent.initialize();
+    const bobBasicMessageRepository = bobAgent.dependencyManager.resolve(
+      BasicMessageRepository,
+    );
+
+    const basicMessageRecord = new BasicMessageRecord({
+      id: 'some-id',
+      connectionId: 'connId',
+      content: 'hello',
+      role: BasicMessageRole.Receiver,
+      sentTime: 'sentIt',
+    });
+
+    // Save in wallet
+    await bobBasicMessageRepository.save(bobAgent.context, basicMessageRecord);
+
+    if (!bobAgent.config.walletConfig) {
+      throw new Error('No wallet config on bobAgent');
+    }
+
+    const backupKey = 'SomeRandomBackUpKey';
+
+    console.log('bobAgent.wallet.isProvisioned', encryptedFileLocation);
+
+    // Create backup and delete wallet
+    await bobAgent.wallet.export({path: encryptedFileLocation, key: backupKey});
+    await bobAgent.wallet.delete();
+  };
+
+  const importWallet = async () => {
+    try {
+      const bobBasicMessageRepository = bobAgent.dependencyManager.resolve(
+        BasicMessageRepository,
+      );
+
+      const basicMessageRecord = new BasicMessageRecord({
+        id: 'some-id',
+        connectionId: 'connId',
+        content: 'hello',
+        role: BasicMessageRole.Receiver,
+        sentTime: 'sentIt',
+      });
+
+      const pickedFile = await pickSingle({
+        type: [types.allFiles],
+        copyTo: 'documentDirectory',
+      });
+
+      if (!pickedFile.fileCopyUri) {
+        console.log('Error in picking file');
+        return;
+      }
+
+      const selectedFilePath = await RNFS.stat(pickedFile.fileCopyUri);
+
+      const backupKey = 'SomeRandomBackUpKey';
+
+      await bobAgent.wallet.import(
+        {
+          id: 'oldWalletId',
+          key: 'newWalletKey',
+          keyDerivationMethod: KeyDerivationMethod.Argon2IInt,
+        },
+        {path: selectedFilePath.path, key: backupKey},
+      );
+      await bobAgent.wallet.initialize({
+        id: 'oldWalletId',
+        key: 'newWalletKey',
+        keyDerivationMethod: KeyDerivationMethod.Argon2IInt,
+      });
+
+      const res = await bobBasicMessageRepository.getById(
+        bobAgent.context,
+        basicMessageRecord.id,
+      );
+
+      console.log('check  ', res.id, res.id === basicMessageRecord.id);
+
+      await bobAgent.shutdown();
+
+      if (bobAgent.wallet.isProvisioned) {
+        await bobAgent.wallet.delete();
+      }
+    } catch (error) {
+      console.log('Error in importing wallet', error);
     }
   };
 
   return (
     <SafeAreaView
       style={{flex: 1, alignItems: 'center', justifyContent: 'center'}}>
-      <Button title="Test Export Wallet" onPress={test} />
+      {/* <Button title="Test Export Wallet" onPress={test} /> */}
+      <View style={{height: 30}} />
+      <Button title="Export Wallet" onPress={exportWallet} />
+      <View style={{height: 30}} />
+      <Button title="Import Wallet" onPress={importWallet} />
     </SafeAreaView>
   );
 };
