@@ -1,5 +1,5 @@
 
-# Aries Framework JavaScript Askar React Native Example
+# Credo Askar React Native Example
 
 The main agent setup and logic are in the `App.tsx`
 
@@ -9,9 +9,9 @@ The main agent setup and logic are in the `App.tsx`
 Make sure have yarn installed and react native setup
 
 ```bash
-git clone https://github.com/sairanjitAW/afj-askar-wallet-react-native.git
+git clone https://github.com/sairanjit/credo-askar-wallet-react-native.git
 
-cd afj-askar-wallet-react-native
+cd credo-askar-wallet-react-native
 
 yarn install
 
