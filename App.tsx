@@ -8,266 +8,293 @@
 import {AskarModule} from '@credo-ts/askar';
 import {
   Agent,
-  BasicMessageRecord,
-  BasicMessageRepository,
-  BasicMessageRole,
+  ConnectionsModule,
   ConsoleLogger,
-  InitConfig,
-  KeyDerivationMethod,
+  DidExchangeState,
+  HttpOutboundTransport,
+  Key,
+  KeyType,
   LogLevel,
+  MediationRecipientModule,
+  MediatorPickupStrategy,
+  Routing,
+  WsOutboundTransport,
 } from '@credo-ts/core';
 import {agentDependencies} from '@credo-ts/react-native';
 import {ariesAskar} from '@hyperledger/aries-askar-react-native';
-import React from 'react';
+import React, {useState} from 'react';
 import {Button, SafeAreaView, View} from 'react-native';
-import {pickSingle, types} from 'react-native-document-picker';
-import RNFS from 'react-native-fs';
-import {zip, unzip} from 'react-native-zip-archive';
-
-const getSqliteAgentOptions = (
-  name: string,
-  extraConfig: Partial<InitConfig> = {},
-) => {
-  const config: InitConfig = {
-    label: `SQLiteAgent: ${name}`,
-    walletConfig: {
-      id: 'oldWalletId',
-      key: 'oldWaletKey',
-      keyDerivationMethod: KeyDerivationMethod.Argon2IInt,
-    },
-    autoUpdateStorageOnStartup: false,
-    logger: new ConsoleLogger(LogLevel.trace),
-    ...extraConfig,
-  };
-  return {
-    config,
-    dependencies: agentDependencies,
-    modules: {
-      askar: new AskarModule({ariesAskar}),
-    },
-  } as const;
-};
-
-const bobAgentOptions = getSqliteAgentOptions('AgentsBob');
-const bobAgent = new Agent(bobAgentOptions);
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const App = () => {
-  const test = async () => {
-    const documentDirectory = RNFS.DownloadDirectoryPath;
-    const backupDirectory = `${documentDirectory}/Wallet_Backup`;
+  const [agent, setAgent] = useState<
+    | undefined
+    | Agent<{
+        mediationReciepients: MediationRecipientModule;
+        connections: ConnectionsModule;
+        askar: AskarModule;
+      }>
+  >();
 
-    const destFileExists = await RNFS.exists(backupDirectory);
-    if (destFileExists) {
-      await RNFS.unlink(backupDirectory);
-    }
+  const [agent2, setAgent2] = useState<
+    | undefined
+    | Agent<{
+        mediationReciepients: MediationRecipientModule;
+        connections: ConnectionsModule;
+        askar: AskarModule;
+      }>
+  >();
 
-    const date = new Date();
-    const dformat = `${date.getHours()}-${date.getMinutes()}-${date.getSeconds()}`;
-    const WALLET_FILE_NAME = `SSI_Wallet_${dformat}`;
+  const [invitation, setInvitation] = useState('');
 
-    await RNFS.mkdir(backupDirectory);
-    const encryptedFileName = `${WALLET_FILE_NAME}.wallet`;
-    const encryptedFileLocation = `${backupDirectory}/${encryptedFileName}`;
-
-    await bobAgent.initialize();
-    const bobBasicMessageRepository = bobAgent.dependencyManager.resolve(
-      BasicMessageRepository,
-    );
-
-    const basicMessageRecord = new BasicMessageRecord({
-      id: 'some-id',
-      connectionId: 'connId',
-      content: 'hello',
-      role: BasicMessageRole.Receiver,
-      sentTime: 'sentIt',
-    });
-
-    // Save in wallet
-    await bobBasicMessageRepository.save(bobAgent.context, basicMessageRecord);
-
-    if (!bobAgent.config.walletConfig) {
-      throw new Error('No wallet config on bobAgent');
-    }
-
-    const backupKey = 'SomeRandomBackUpKey';
-
-    console.log('bobAgent.wallet.isProvisioned', encryptedFileLocation);
-
-    // Create backup and delete wallet
-    await bobAgent.wallet.export({path: encryptedFileLocation, key: backupKey});
-    await bobAgent.wallet.delete();
-
-    // Import backup with different wallet id and initialize
-    await bobAgent.wallet.import(
-      {
-        id: 'oldWalletId',
-        key: 'newWalletKey',
-        keyDerivationMethod: KeyDerivationMethod.Argon2IInt,
-      },
-      {path: encryptedFileLocation, key: backupKey},
-    );
-    await bobAgent.wallet.initialize({
-      id: 'oldWalletId',
-      key: 'newWalletKey',
-      keyDerivationMethod: KeyDerivationMethod.Argon2IInt,
-    });
-
-    const res = await bobBasicMessageRepository.getById(
-      bobAgent.context,
-      basicMessageRecord.id,
-    );
-
-    console.log('check  ', res.id, res.id === basicMessageRecord.id);
-
-    await bobAgent.shutdown();
-
-    if (bobAgent.wallet.isProvisioned) {
-      await bobAgent.wallet.delete();
-    }
-  };
-
-  const exportWallet = async () => {
+  const initializeAgent = async () => {
     try {
-      const documentDirectory = RNFS.DownloadDirectoryPath;
-      const date = new Date();
-      const dformat = `${date.getHours()}-${date.getMinutes()}-${date.getSeconds()}`;
-      const backupDirectory = `${documentDirectory}/Wallet_Backup_${dformat}`;
-
-      const destFileExists = await RNFS.exists(backupDirectory);
-      if (destFileExists) {
-        await RNFS.unlink(backupDirectory);
-      }
-
-      const WALLET_FILE_NAME = 'SSI_Wallet';
-      const WALLET_FILE_NAME_DATE = `SSI_Wallet_${dformat}`;
-
-      await RNFS.mkdir(backupDirectory);
-      const encryptedFileName = `${WALLET_FILE_NAME}.wallet`;
-      const encryptedFileLocation = `${backupDirectory}/${encryptedFileName}`;
-      const destinationZipPath = `${documentDirectory}/${WALLET_FILE_NAME_DATE}.zip`;
-
-      await bobAgent.initialize();
-      const bobBasicMessageRepository = bobAgent.dependencyManager.resolve(
-        BasicMessageRepository,
-      );
-
-      const basicMessageRecord = new BasicMessageRecord({
-        id: 'some-id',
-        connectionId: 'connId',
-        content: 'hello',
-        role: BasicMessageRole.Receiver,
-        sentTime: 'sentIt',
-      });
-
-      // Save in wallet
-      await bobBasicMessageRepository.save(
-        bobAgent.context,
-        basicMessageRecord,
-      );
-
-      if (!bobAgent.config.walletConfig) {
-        throw new Error('No wallet config on bobAgent');
-      }
-
-      const backupKey = 'SomeRandomBackUpKey';
-
-      console.log('bobAgent.wallet.isProvisioned', encryptedFileLocation);
-
-      // Create backup and delete wallet
-      await bobAgent.wallet.export({
-        path: encryptedFileLocation,
-        key: backupKey,
-      });
-      await bobAgent.wallet.delete();
-
-      const res = await zip(backupDirectory, destinationZipPath);
-      console.log('res', res);
-    } catch (error) {
-      console.error('Error in exporting wallet', error);
-    }
-  };
-
-  const importWallet = async () => {
-    try {
-      const bobBasicMessageRepository = bobAgent.dependencyManager.resolve(
-        BasicMessageRepository,
-      );
-
-      const basicMessageRecord = new BasicMessageRecord({
-        id: 'some-id',
-        connectionId: 'connId',
-        content: 'hello',
-        role: BasicMessageRole.Receiver,
-        sentTime: 'sentIt',
-      });
-
-      const pickedFile = await pickSingle({
-        type: [types.zip],
-        copyTo: 'documentDirectory',
-      });
-
-      if (!pickedFile.fileCopyUri) {
-        console.log('Error in picking file');
-        return;
-      }
-
-      const restoreDirectoryPath = RNFS.DocumentDirectoryPath;
-
-      const WALLET_FILE_NAME = 'SSI_Wallet';
-
-      const walletFilePath = `${restoreDirectoryPath}/${WALLET_FILE_NAME}.wallet`;
-
-      const selectedFilePath = await RNFS.stat(pickedFile.fileCopyUri);
-      console.log(
-        'selectedFilePath',
-        selectedFilePath.path,
-        restoreDirectoryPath,
-      );
-
-      const val = await unzip(selectedFilePath.path, restoreDirectoryPath);
-      console.log('val', val);
-
-      const backupKey = 'SomeRandomBackUpKey';
-
-      await bobAgent.wallet.import(
-        {
-          id: 'oldWalletId',
-          key: 'newWalletKey',
-          keyDerivationMethod: KeyDerivationMethod.Argon2IInt,
+      const mobileVerifier = new Agent({
+        config: {
+          label: 'Mobile Verifier',
+          walletConfig: {
+            id: 'walletId',
+            key: 'walletKey',
+          },
+          autoUpdateStorageOnStartup: false,
+          logger: new ConsoleLogger(LogLevel.trace),
         },
-        {path: walletFilePath, key: backupKey},
-      );
-      await bobAgent.wallet.initialize({
-        id: 'oldWalletId',
-        key: 'newWalletKey',
-        keyDerivationMethod: KeyDerivationMethod.Argon2IInt,
+        dependencies: agentDependencies,
+        modules: {
+          mediationRecipient: new MediationRecipientModule({
+            mediatorInvitationUrl: '',
+            mediatorPickupStrategy: MediatorPickupStrategy.PickUpV2,
+          }),
+
+          connections: new ConnectionsModule({
+            autoAcceptConnections: true,
+          }),
+          askar: new AskarModule({ariesAskar}),
+        },
       });
 
-      const res = await bobBasicMessageRepository.getById(
-        bobAgent.context,
-        basicMessageRecord.id,
-      );
+      mobileVerifier.registerOutboundTransport(new HttpOutboundTransport());
+      mobileVerifier.registerOutboundTransport(new WsOutboundTransport());
 
-      console.log('check  ', res.id, res.id === basicMessageRecord.id);
+      // const resp = mobileVerifier.mediationRecipient.findDefaultMediator();
 
-      await bobAgent.shutdown();
-
-      if (bobAgent.wallet.isProvisioned) {
-        await bobAgent.wallet.delete();
-      }
+      mobileVerifier
+        .initialize()
+        .then(() => {
+          console.log('Agent initialized!');
+          setAgent(mobileVerifier);
+        })
+        .catch(e => {
+          console.error(
+            `Something went wrong while setting up the agent! Message: ${e}`,
+          );
+        });
     } catch (error) {
-      console.log('Error in importing wallet', error);
+      console.error('Error initializing agent', error);
     }
+  };
+
+  const initializeAgent1 = async () => {
+    try {
+      const mobileVerifier1 = new Agent({
+        config: {
+          label: 'Mobile Verifier 1',
+          walletConfig: {
+            id: 'walletId1',
+            key: 'walletKey',
+          },
+          autoUpdateStorageOnStartup: false,
+          logger: new ConsoleLogger(LogLevel.trace),
+        },
+        dependencies: agentDependencies,
+        modules: {
+          mediationRecipient: new MediationRecipientModule({
+            mediatorInvitationUrl: '',
+            mediatorPickupStrategy: MediatorPickupStrategy.PickUpV2,
+          }),
+
+          connections: new ConnectionsModule({
+            autoAcceptConnections: true,
+          }),
+          askar: new AskarModule({ariesAskar}),
+        },
+      });
+
+      mobileVerifier1.registerOutboundTransport(new HttpOutboundTransport());
+      mobileVerifier1.registerOutboundTransport(new WsOutboundTransport());
+
+      // const resp = mobileVerifier.mediationRecipient.findDefaultMediator();
+
+      mobileVerifier1
+        .initialize()
+        .then(() => {
+          console.log('Agent initialized! 1');
+          setAgent2(mobileVerifier1);
+        })
+        .catch(e => {
+          console.error(
+            `Something went wrong while setting up the agent! Message: ${e}`,
+          );
+        });
+    } catch (error) {
+      console.error('Error initializing agent', error);
+    }
+  };
+
+  const createInvitation = async () => {
+    if (!agent) {
+      return;
+    }
+
+    let routingData: Routing | undefined;
+    const routing = await AsyncStorage.getItem('routing');
+
+    console.log('routing check', routing);
+
+    if (routing) {
+      const parsedRouting = JSON.parse(routing);
+      const routingObj = {
+        endpoints: parsedRouting.endpoints,
+        mediatorId: parsedRouting.mediatorId,
+        recipientKey: Key.fromPublicKeyBase58(
+          parsedRouting.recipientKey,
+          KeyType.Ed25519,
+        ),
+        routingKeys: parsedRouting.routingKeys.map((key: string) =>
+          Key.fromPublicKeyBase58(key, KeyType.Ed25519),
+        ),
+      };
+
+      routingData = routingObj;
+    } else {
+      const didRouting = await agent.mediationRecipient.getRouting({});
+      const rout = {
+        endpoints: didRouting.endpoints,
+        mediatorId: didRouting.mediatorId,
+        recipientKey: didRouting.recipientKey.publicKeyBase58,
+        routingKeys: didRouting.routingKeys.map(key => key.publicKeyBase58),
+      };
+
+      routingData = didRouting;
+      // setRouting(didRouting);
+      console.log('routingData 22', JSON.stringify(routingData));
+
+      await AsyncStorage.setItem('routing', JSON.stringify(rout));
+      // setCreatedInvitationDid(did.didState.did);
+    }
+
+    // let invitationDid: string | undefined;
+
+    // const inviDid = await AsyncStorage.getItem('invitationDid');
+
+    // if (inviDid) {
+    //   invitationDid = inviDid;
+    // } else {
+    //   const didRouting = await agent.mediationRecipient.getRouting({});
+
+    //   // store routing data in async storage as json
+
+    //   const routingKeys = didRouting.routingKeys.map(
+    //     key => key.publicKeyBase58,
+    //   );
+
+    //   const rout = {
+    //     endpoints: didRouting.endpoints,
+    //     mediatorId: didRouting.mediatorId,
+    //     recipientKey: didRouting.recipientKey.publicKeyBase58,
+    //     routingKeys: didRouting.routingKeys.map(key => key.publicKeyBase58),
+    //   };
+
+    //   // const didDocument = createPeerDidDocumentFromServices([
+    //   //   {
+    //   //     id: 'didcomm',
+    //   //     recipientKeys: [didRouting.recipientKey],
+    //   //     routingKeys: didRouting.routingKeys || [],
+    //   //     serviceEndpoint: didRouting.endpoints[0],
+    //   //   },
+    //   // ]);
+    //   // // Create the DID
+    //   // const did = await agent.dids.create<PeerDidNumAlgo2CreateOptions>({
+    //   //   didDocument,
+    //   //   method: 'peer',
+    //   //   options: {
+    //   //     numAlgo: PeerDidNumAlgo.MultipleInceptionKeyWithoutDoc,
+    //   //   },
+    //   // });
+
+    //   console.log('diddoc', JSON.stringify(did));
+    //   await AsyncStorage.setItem('invitationDid', did.didState.did);
+    //   invitationDid = did.didState.did;
+    //   // setCreatedInvitationDid(did.didState.did)
+    // }
+
+    // console.log('invitationDid', JSON.stringify(invitationDid));
+
+    const outOfBandRecord = await agent.oob.createInvitation({
+      goalCode: 'aries.vc.MobielVerifier.once',
+      routing: routingData,
+      // invitationDid,
+    });
+
+    console.log('outOfBandRecord', outOfBandRecord.outOfBandInvitation);
+    console.log(
+      'outOfBandRecord',
+      outOfBandRecord.outOfBandInvitation.toUrl({
+        domain: 'https://github.com',
+      }),
+    );
+
+    setInvitation(
+      outOfBandRecord.outOfBandInvitation.toUrl({
+        domain: 'https://github.com',
+      }),
+    );
+  };
+
+  const receiveInvitation = async () => {
+    if (!agent2) {
+      return;
+    }
+
+    const outOfBandRecord = await agent2.oob.receiveInvitationFromUrl(
+      invitation,
+      {
+        reuseConnection: true,
+      },
+    );
+
+    console.log('outOfBandRecord', outOfBandRecord);
+  };
+
+  const getConnections = async () => {
+    if (!agent2 && !agent) {
+      return;
+    }
+
+    const outOfBandRecord = await agent?.connections.findAllByQuery({
+      state: DidExchangeState.Completed,
+    });
+    const outOfBandRecord1 = await agent2?.connections.findAllByQuery({
+      state: DidExchangeState.Completed,
+    });
+
+    console.log('outOfBandRecord', outOfBandRecord?.length);
+    console.log('outOfBandRecord1', outOfBandRecord1?.length);
   };
 
   return (
     <SafeAreaView
       style={{flex: 1, alignItems: 'center', justifyContent: 'center'}}>
-      {/* <Button title="Test Export Wallet" onPress={test} /> */}
       <View style={{height: 30}} />
-      <Button title="Export Wallet" onPress={exportWallet} />
+      <Button title="Initialize Agent" onPress={initializeAgent} />
       <View style={{height: 30}} />
-      <Button title="Import Wallet" onPress={importWallet} />
+      <Button title="Initialize Agent 1" onPress={initializeAgent1} />
+      <View style={{height: 30}} />
+      <Button title="Create Invitation" onPress={createInvitation} />
+      <View style={{height: 30}} />
+      <Button title="Recieve Invitation" onPress={receiveInvitation} />
+      <View style={{height: 30}} />
+      <Button title="Get Connections" onPress={getConnections} />
     </SafeAreaView>
   );
 };
